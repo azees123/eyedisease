@@ -1,7 +1,8 @@
 import os
 import numpy as np
 from PIL import Image
-import tensorflow as tf
+#import tensorflow as tf
+import tflite_runtime.interpreter as tflite
 
 from kivy.app import App
 from kivy.uix.image import Image as KivyImage
@@ -11,9 +12,11 @@ from kivy.uix.button import Button
 from kivy.uix.popup import Popup
 from plyer import filechooser
 
-# === Load TensorFlow model ===
-model_path = 'eye_disease_model.h5'
-model = tf.keras.models.load_model(model_path)
+# === Load TensorFlow Lite model ===
+model_path = 'eye_disease_model.tflite'
+#interpreter = tf.lite.Interpreter(model_path=model_path)
+interpreter = tflite.Interpreter(model_path=model_path)
+interpreter.allocate_tensors()
 
 # Disease label mapping
 disease_classes = {
@@ -29,27 +32,41 @@ disease_classes = {
     9: 'Retinitis Pigmentosa'
 }
 
-# Prediction function
+# Prediction function using TensorFlow Lite
 def predict_image(image_path):
     img = Image.open(image_path)
-    img = img.resize((64, 64))
-    img = img.convert('RGB')
-    img = np.array(img) / 255.0
-    img = np.expand_dims(img, axis=0)
-    prediction = model.predict(img)
+    img = img.resize((64, 64))  # Resize the image
+    img = img.convert('RGB')  # Convert the image to RGB mode
+    img = np.array(img) / 255.0  # Normalize the image
+
+    # Prepare the image for TensorFlow Lite model
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+
+    # Set input tensor
+    interpreter.set_tensor(input_details[0]['index'], np.expand_dims(img, axis=0).astype(np.float32))
+
+    # Run inference
+    interpreter.invoke()
+
+    # Get output tensor
+    prediction = interpreter.get_tensor(output_details[0]['index'])
     predicted_class = np.argmax(prediction)
+    
     return disease_classes.get(predicted_class, 'Unknown')
 
 
 class EyeDiseaseApp(App):
     def build(self):
         self.layout = BoxLayout(orientation='vertical', spacing=10, padding=10)
-        
+
+        # Image display
         self.image_display = KivyImage()
         self.result_label = Label(text="Upload an eye image for prediction", font_size=18)
         self.select_button = Button(text='Choose Image', size_hint=(1, 0.2))
         self.select_button.bind(on_release=self.choose_file)
 
+        # Add widgets to the layout
         self.layout.add_widget(self.image_display)
         self.layout.add_widget(self.result_label)
         self.layout.add_widget(self.select_button)
